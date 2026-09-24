@@ -195,6 +195,29 @@ describe("omo setup credential inheritance", () => {
     expect(result.stdout).toContain("/login chatgpt-subscription")
   })
 
+  test("#given a skipped oauth provider and keys to import #when accepted #then the sign-in guidance is printed exactly once", () => {
+    const item = fixture()
+    write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({
+      openai: { type: "oauth", access: secrets[0] },
+      google: { type: "api", key: secrets[1] },
+    }))
+
+    const result = run(item, ["setup", "--yes"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.split("/login chatgpt-subscription").length - 1).toBe(1)
+  })
+
+  test("#given a skipped oauth provider and nothing to import #when setup runs #then the sign-in guidance is printed exactly once", () => {
+    const item = fixture()
+    write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({ openai: { type: "oauth", access: secrets[0] } }))
+
+    const result = run(item, ["setup", "--yes"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.split("/login chatgpt-subscription").length - 1).toBe(1)
+  })
+
   test("#given a dry run with skipped credentials #when setup previews #then the same guidance is shown", () => {
     const item = fixture()
     write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({

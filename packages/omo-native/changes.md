@@ -45,6 +45,9 @@ Reading another harness's config directory and writing the engine's own global c
 ### Expected merge conflict zones
 
 `bin/lib/setup-import.js` `runSetup` tail.
+
+Follow-up: the sign-in guidance is printed once, with the plan. `printCounts` used to repeat it, so a `--yes` run showed the same `/login` lines twice (pinned by two `setup-import.test.ts` cases, both RED at `Received: 2` before the change).
+
 ## 2026-09-23 - the comment-checker runtime dependency is removed again; the extension downloads the pinned release (#8247)
 
 ### What changed
