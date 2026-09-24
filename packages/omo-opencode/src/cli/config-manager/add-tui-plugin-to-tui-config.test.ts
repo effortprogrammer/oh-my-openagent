@@ -97,6 +97,52 @@ describe("ensureTuiPluginEntry", () => {
     expect(readTuiPlugins(dir)).toEqual([LEGACY_PLUGIN_NAME])
   })
 
+  it("#given a stale tagged entry written by an older installer #when ensuring #then it replaces it with exactly one entry", () => {
+    // given — 4.19.4 installers wrote `<pkg>@latest`; 5.x writes the bare name
+    const dir = tempConfigDir()
+    writeConfig(dir, "opencode.json", { plugin: [PLUGIN_NAME] })
+    writeConfig(dir, "tui.json", { plugin: [`${PLUGIN_NAME}@latest`] })
+
+    // when
+    const result = ensureTuiPluginEntry({ configDir: dir })
+
+    // then
+    expect(result).toEqual({ changed: true, reason: "added" })
+    expect(readTuiPlugins(dir)).toEqual([PLUGIN_NAME])
+  })
+
+  it("#given a legacy-name entry and unrelated plugins #when ensuring #then only our entry is replaced and order is preserved", () => {
+    // given
+    const dir = tempConfigDir()
+    writeConfig(dir, "opencode.json", { plugin: [`${PLUGIN_NAME}@5.0.0`] })
+    writeConfig(dir, "tui.json", {
+      plugin: ["some-other/tui", `${LEGACY_PLUGIN_NAME}@4.19.4`, "another-plugin"],
+    })
+
+    // when
+    const result = ensureTuiPluginEntry({ configDir: dir })
+
+    // then
+    expect(result).toEqual({ changed: true, reason: "added" })
+    expect(readTuiPlugins(dir)).toEqual(["some-other/tui", "another-plugin", `${PLUGIN_NAME}@5.0.0`])
+  })
+
+  it("#given a tuple entry for our package #when ensuring #then it is replaced and foreign tuple entries survive", () => {
+    // given
+    const dir = tempConfigDir()
+    writeConfig(dir, "opencode.json", { plugin: [PLUGIN_NAME] })
+    writeConfig(dir, "tui.json", {
+      plugin: [["some-other/tui", { enabled: true }], [`${PLUGIN_NAME}@beta`, { enabled: true }]],
+    })
+
+    // when
+    const result = ensureTuiPluginEntry({ configDir: dir })
+
+    // then
+    expect(result).toEqual({ changed: true, reason: "added" })
+    expect(readTuiPlugins(dir)).toEqual([["some-other/tui", { enabled: true }], PLUGIN_NAME])
+  })
+
   it("#given missing or source-only server entry #when ensuring #then it does not write", () => {
     // given
     const missing = tempConfigDir()

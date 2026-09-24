@@ -7,6 +7,7 @@ import {
   PLUGIN_NAME,
   getOpenCodeConfigDir,
   getOpenCodeConfigPaths,
+  isPluginTupleEntry,
   log,
   parseJsonc,
 } from "../../../shared"
@@ -119,6 +120,20 @@ export function isNamedTuiPluginEntry(entry: unknown): boolean {
       || entry.startsWith(`${canonicalPrefix}@`)
       || entry === legacyPrefix
       || entry.startsWith(`${legacyPrefix}@`))
+}
+
+/**
+ * Every `tui.json` entry that belongs to this plugin, whatever spec it carries:
+ * the bare package name, any tag or version spec, the legacy package name, the
+ * `<pkg>/tui` subpath older installers wrote, and our `file:` dev entries —
+ * in string or `[name, options]` tuple form. The installer replaces all of them
+ * with the single entry it writes, the way `addPluginToOpenCodeConfig`
+ * normalizes `opencode.json`.
+ */
+export function isOmoManagedTuiEntry(entry: unknown): boolean {
+  const name = typeof entry === "string" ? entry : isPluginTupleEntry(entry) ? entry[0] : null
+  if (name === null) return false
+  return isNamedTuiPluginEntry(name) || isTuiPluginEntry(name)
 }
 
 function isCanonicalNamedTuiPluginEntry(entry: unknown): boolean {
