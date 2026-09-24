@@ -19,6 +19,32 @@ The provider map and the setup import flow are this package's own surface; the e
 ### Expected merge conflict zones
 
 `bin/lib/provider-map.json` (every senpi pin bump re-derives it), `bin/lib/setup-import.js` print helpers.
+
+## 2026-09-24 - omo setup carries over OpenCode MCP servers and global skills, not just credentials
+
+### What changed
+
+`bin/lib/setup-opencode-assets.js` (new) reads the OpenCode user-scope config (`$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, `opencode.json` then `opencode.jsonc`) plus the global skill tree (`skills/`, then `skill/`) and converts what it finds to the shapes the engine reads. `type: "local"` becomes `type: "stdio"` with the head of `command[]` as `command` and the tail as `args`, `environment` becomes `env`, `type: "remote"` becomes `type: "http"`, and `oauth: false` becomes `auth: false`. OpenCode's `{env:NAME}` placeholders become the engine's `${NAME}`. `bin/lib/jsonc.js` (new) is the string-aware comment and trailing-comma stripper the `.jsonc` path needs; strict JSON is tried first so the common file pays nothing.
+
+`bin/lib/setup-assets-import.js` (new) owns the asset stage end to end: classify against what the target already has, print the preview, ask, write. MCP servers merge into the engine's GLOBAL `<agentDir>/mcp.json` under `mcpServers`, preserving every other key in that document, with a timestamped `.bak-` copy and an atomic 0600 write; skills are copied into the GLOBAL `<agentDir>/skills/<name>/`. An existing server name or skill directory is never overwritten - it is reported as `mcp-skipped-existing` / `skills-skipped-existing`.
+
+`bin/lib/setup-import.js` splits the credential stage into `importCredentials` and calls the new asset stage after it, passing its own consent prompt so both stages ask the same way. `--dry-run` previews assets and writes nothing; `--yes` accepts both stages.
+
+`test/setup-opencode-assets.test.ts` and `test/setup-assets-import.test.ts` are new: the first pins the conversions, the jsonc edge cases and the refusal rule, the second drives the real launcher end to end for import, no-overwrite, dry-run and idempotency.
+
+### Why
+
+An OpenCode user's MCP servers and skills are most of their setup, and `omo setup` imported none of it. The onboarding skill's migration lane filled the gap by hand and filled it wrong: it wrote a GLOBAL OpenCode MCP server into the PROJECT `.mcp.json`, so a fresh session in any other directory could not see it. The engine reads global servers from `<agentDir>/mcp.json` (always trusted) and global skills from `<agentDir>/skills`, which is where a global server and a global skill belong.
+
+A server whose config contains shell command substitution is deliberately dropped with a notice rather than copied: the engine's MCP interpolation rejects `$(` and throws for the whole file, so copying one such value would take every other server down with it.
+
+### Why an extension could not handle it
+
+Reading another harness's config directory and writing the engine's own global config before the engine starts is the launcher's job; an extension only runs once the engine is already up.
+
+### Expected merge conflict zones
+
+`bin/lib/setup-import.js` `runSetup` tail.
 ## 2026-09-23 - the comment-checker runtime dependency is removed again; the extension downloads the pinned release (#8247)
 
 ### What changed

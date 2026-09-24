@@ -10,6 +10,12 @@ environment carries the `OMO_NATIVE=1` / `OMO_BIN` markers the skill tells the a
 `senpi --list-tips` under a plain senpi install, with `"$OMO_BIN" --list-tips` as the fallback
 when `omo` itself is not on PATH (bunx/npx launches).
 
+## 2026-09-24 - onboarding lane 2 stops hand-moving global OpenCode MCP servers into project files
+
+`skills/onboarding/SKILL.md` lane 2 (migration help) now tells the guide that global OpenCode MCP servers and global OpenCode skills are `omo setup`'s job: it imports them into `~/.omo/agent/mcp.json` and `~/.omo/agent/skills/`, consent-gated, converted, and without overwriting an existing name, previewable with `omo setup --dry-run`. The migration-plan sentence splits "which MCP servers move to the project `.mcp.json`" into what setup carries over globally and what is genuinely project-only.
+
+Written because the old wording produced the bug it was meant to prevent: the lane moved a GLOBAL server into the PROJECT `.mcp.json`, and the next session outside that project saw nothing. Implementation detail lives in `packages/omo-native/changes.md`.
+
 ## ulw-research: deliverable lane interview, static gates, outcome manifest, and bounded repair
 
 `skills/ulw-research/SKILL.md` replaces the always-ask format-proposal gate with the deliverable lane and
@@ -1193,6 +1199,7 @@ so the connection that opens a session drops at once and the host moved the new 
 `set_session_name`, sends `retain_on_disconnect: true`, and merges the entry the host reports in
 `list_sessions` before returning. When QA'ing this surface, run the host from the engine this repo
 pins: `retain_on_disconnect` landed in senpi 2026.9.20, and an older host ignores it in silence.
+
 ## 2026-09-23 — Four-profile provider coverage follows task routing
 
 Geeky profiles keep the #8737 provider ranking: ChatGPT subscription first,
