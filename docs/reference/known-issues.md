@@ -115,8 +115,9 @@ BLOCKER-4 is resolved in v4.2.1. Delegated child sessions now retain the first p
 
 - **Affects**: OpenCode installs that load `oh-my-openagent@latest` or legacy `oh-my-opencode@latest` through OpenCode's `Npm.add()` package sandbox under `~/.cache/opencode/packages/`.
 - **Symptom**: OMO reports that an update is available, or `doctor` reports a loaded-version mismatch, but restarting OpenCode keeps loading the older package. Clearing the general npm cache does not necessarily change the sandbox path OpenCode is using.
-- **Why it happens**: When the plugin is running from an OpenCode-managed sandbox such as `~/.cache/opencode/packages/oh-my-openagent@latest/node_modules/oh-my-openagent/`, OMO cannot reliably rewrite that sandbox itself. The auto-update checker therefore avoids claiming "Updated!" from that path and should surface an update-available notice instead.
-- **Workaround**: Close OpenCode and keep exactly one OMO entry in the config that currently owns the plugin. If that entry still uses `oh-my-opencode@latest`, replace it with `oh-my-openagent@latest` instead of adding a second entry. Remove the stale OpenCode package sandbox, then reinstall with `--force` in the same config scope:
+- **Why it happens**: OpenCode installs the plugin into a sandbox of its own at `~/.cache/opencode/packages/<spec>/node_modules/<package>/` and reuses that copy as long as it exists, without re-resolving the tag. A moving tag such as `@latest` or `@beta` therefore stays frozen at the version installed first.
+- **What OMO does now**: when the update checker sees a newer version for the channel and the plugin is running from such a sandbox, it schedules that sandbox for removal when OpenCode exits, so the next start installs the current version — the "Restart to apply" notice does what it says. Re-running the installer clears the sandbox for the spec it writes as well, so `bunx oh-my-openagent install` upgrades a stuck install. A newer local version than the channel tag is never treated as an update, so no downgrade is offered.
+- **Workaround (only if the sandbox survived, e.g. OpenCode was killed with a signal so it never ran its exit handlers)**: close OpenCode and keep exactly one OMO entry in the config that currently owns the plugin. If that entry still uses `oh-my-opencode@latest`, replace it with `oh-my-openagent@latest` instead of adding a second entry. Remove the stale OpenCode package sandbox, then reinstall with `--force` in the same config scope:
 
   ```sh
   rm -rf ~/.cache/opencode/packages/oh-my-openagent@latest \
@@ -131,7 +132,7 @@ BLOCKER-4 is resolved in v4.2.1. Delegated child sessions now retain the first p
   bunx oh-my-openagent doctor --json
   ```
 
-- **Status**: Open. The runtime now avoids the misleading auto-updated toast when it detects an OpenCode-managed sandbox, but users may still need the manual cache refresh above until OpenCode exposes a reliable package-sandbox update path. Tracked at https://github.com/code-yeongyu/oh-my-openagent/issues/5367.
+- **Status**: Mitigated on the OMO side. The runtime no longer claims "Updated!" from a sandbox, invalidates the stale sandbox on exit, and the installer refreshes the spec it writes; the underlying caching behavior still belongs to OpenCode's `Npm.add()`. Tracked at https://github.com/code-yeongyu/oh-my-openagent/issues/5367.
 
 ## #5050: OpenCode can hang during startup before the plugin runs
 

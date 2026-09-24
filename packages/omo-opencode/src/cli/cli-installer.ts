@@ -31,6 +31,7 @@ import { NATIVE_EDITION_HINT_TITLE, nativeEditionHintLines, shouldShowNativeEdit
 import { starGitHubRepositories } from "./star-request"
 import { getNoModelProvidersWarning, hasAnyConfiguredProvider } from "./provider-availability"
 import { ensureTuiPluginEntry } from "./config-manager/add-tui-plugin-to-tui-config"
+import { refreshOpenCodePluginSandboxes } from "./config-manager/refresh-opencode-plugin-sandbox"
 import * as astGrepInstall from "./install-ast-grep-sg"
 
 export async function runCliInstaller(args: InstallArgs, version: string): Promise<number> {
@@ -118,6 +119,19 @@ export async function runCliInstaller(args: InstallArgs, version: string): Promi
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       printWarning(`Could not update OpenCode TUI config: ${message}`)
+    }
+    // OpenCode's Npm.add() never re-resolves a tag while its per-spec sandbox
+    // exists, so a stale sandbox would keep serving the previous version even
+    // after this install. Remove the sandboxes for the spec(s) just written;
+    // the next OpenCode start reinstalls the current channel version (#5367).
+    try {
+      const { removed } = refreshOpenCodePluginSandboxes()
+      if (removed.length > 0) {
+        printInfo("Refreshed the OpenCode plugin cache; the next OpenCode start loads the installed version.")
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      printWarning(`Could not refresh the OpenCode plugin cache: ${message}`)
     }
 
     printStep(step++, totalSteps, `Writing ${PLUGIN_NAME} configuration...`)

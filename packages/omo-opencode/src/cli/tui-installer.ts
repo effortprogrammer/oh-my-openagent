@@ -19,6 +19,7 @@ import { NATIVE_EDITION_HINT_TITLE, nativeEditionHintLines, shouldShowNativeEdit
 import { starGitHubRepositories } from "./star-request"
 import { getNoModelProvidersWarning, hasAnyConfiguredProvider } from "./provider-availability"
 import { ensureTuiPluginEntry } from "./config-manager/add-tui-plugin-to-tui-config"
+import { refreshOpenCodePluginSandboxes } from "./config-manager/refresh-opencode-plugin-sandbox"
 import * as astGrepInstall from "./install-ast-grep-sg"
 
 export async function runTuiInstaller(args: InstallArgs, version: string): Promise<number> {
@@ -99,6 +100,18 @@ export async function runTuiInstaller(args: InstallArgs, version: string): Promi
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       p.log.warn(`Could not update OpenCode TUI config: ${message}`)
+    }
+    // See cli-installer.ts: clear OpenCode's per-spec plugin sandboxes for the
+    // spec(s) just written so the next OpenCode start loads this version
+    // instead of the cached one (#5367).
+    try {
+      const { removed } = refreshOpenCodePluginSandboxes()
+      if (removed.length > 0) {
+        p.log.info("Refreshed the OpenCode plugin cache; the next OpenCode start loads the installed version.")
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      p.log.warn(`Could not refresh the OpenCode plugin cache: ${message}`)
     }
 
     spinner.start(`Writing ${PLUGIN_NAME} configuration`)
