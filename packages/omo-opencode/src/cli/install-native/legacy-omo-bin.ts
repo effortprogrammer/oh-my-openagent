@@ -2,7 +2,12 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs"
 import { delimiter, dirname, isAbsolute, join } from "node:path"
 
 export const NATIVE_OMO_PACKAGE = "omo-ai"
-export const LEGACY_OMO_BIN_PACKAGES: readonly string[] = ["oh-my-openagent", "oh-my-opencode"]
+export const LEGACY_OMO_BIN_PACKAGES: readonly string[] = ["oh-my-openagent", "oh-my-opencode", "lazycodex"]
+
+// Pre-rename Codex Light installs wrote `omo` as a generated shell wrapper into ~/.local/bin, not as a
+// package-manager link. The Light installer retires it by this marker; the cache path names the version.
+const CODEX_LIGHT_WRAPPER_MARKER = "OMO_GENERATED_RUNTIME_WRAPPER"
+const CODEX_LIGHT_CACHE_VERSION = /[\\/]plugins[\\/]cache[\\/]sisyphuslabs[\\/]omo[\\/]([^\\/"'\s]+)[\\/]/
 
 const OMO_BIN_NAME = "omo"
 // Windows filenames are case-insensitive, so one spelling per extension is enough.
@@ -124,6 +129,8 @@ function resolveOwner(binPath: string): OmoBinOwner | null {
 
   const shim = readShimText(binPath)
   if (shim === null) return null
+  const lightWrapper = codexLightWrapperOwner(shim)
+  if (lightWrapper !== null) return lightWrapper
   // A relative shim path (every Windows `.cmd`) must not be walked: resolving it would climb out of
   // the current working directory and report whatever package.json happens to sit above it.
   const referenced = shim.match(/["']([^"'\n]*node_modules[\\/][^"'\n]*)["']/)?.[1]
@@ -138,6 +145,12 @@ function resolveOwner(binPath: string): OmoBinOwner | null {
   const bare = name?.[2]
   if (bare === undefined) return null
   return { name: scope === undefined ? bare : `${scope}/${bare}`, version: null }
+}
+
+function codexLightWrapperOwner(shim: string): OmoBinOwner | null {
+  if (!shim.includes(CODEX_LIGHT_WRAPPER_MARKER)) return null
+  const version = shim.match(CODEX_LIGHT_CACHE_VERSION)?.[1]
+  return version === undefined ? null : { name: "lazycodex", version }
 }
 
 function isInsideNodeModules(path: string): boolean {

@@ -10,7 +10,7 @@ import {
   resolveOmoBinEnvironment,
   scanOmoBins,
 } from "./legacy-omo-bin"
-import { createBinFixtureRoot, writeGlobalPackageBin } from "./omo-bin-test-fixtures"
+import { createBinFixtureRoot, writeCodexLightRuntimeWrapper, writeGlobalPackageBin } from "./omo-bin-test-fixtures"
 
 const roots: string[] = []
 
@@ -208,5 +208,32 @@ describe("resolveOmoBinEnvironment", () => {
     // then
     expect(environment.pathDirectories).toEqual(["C:\\npm", "C:\\Users\\dev\\.bun\\bin"])
     expect(environment.isWindows).toBe(true)
+  })
+})
+
+describe("scanOmoBins with a Codex Light runtime wrapper", () => {
+  test("#given the omo wrapper a pre-rename Codex Light install wrote into ~/.local/bin #when scanning #then it is legacy and names the Light version", () => {
+    // given
+    const light = writeCodexLightRuntimeWrapper({ root: root("light-wrapper"), version: "4.19.4" })
+
+    // when
+    const entries = scanOmoBins(environmentOf([light.binDir]))
+
+    // then
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.kind).toBe("legacy")
+    expect(entries[0]?.packageName).toBe("lazycodex")
+    expect(entries[0]?.packageVersion).toBe("4.19.4")
+  })
+
+  test("#given a hand-written omo script that only mentions the Light cache path #when scanning #then it stays foreign", () => {
+    // given
+    const lookalike = writeCodexLightRuntimeWrapper({ root: root("light-lookalike"), version: "4.19.4", marker: "my own script" })
+
+    // when
+    const entries = scanOmoBins(environmentOf([lookalike.binDir]))
+
+    // then
+    expect(entries[0]?.kind).toBe("foreign")
   })
 })

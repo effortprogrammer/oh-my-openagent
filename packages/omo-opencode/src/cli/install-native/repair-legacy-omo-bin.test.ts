@@ -1,11 +1,11 @@
 /// <reference types="bun-types" />
 
-import { chmodSync, existsSync, rmSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { legacyOmoBins, scanOmoBins } from "./legacy-omo-bin"
 import { repairLegacyOmoBins } from "./repair-legacy-omo-bin"
-import { createBinFixtureRoot, writeGlobalPackageBin } from "./omo-bin-test-fixtures"
+import { createBinFixtureRoot, writeCodexLightRuntimeWrapper, writeGlobalPackageBin } from "./omo-bin-test-fixtures"
 
 const roots: string[] = []
 
@@ -84,5 +84,22 @@ describe("repairLegacyOmoBins", () => {
     expect(repair.failures).toHaveLength(1)
     expect(repair.warnings.join("\n")).toContain(npm.binPath)
     expect(repair.warnings.join("\n")).toContain("npm uninstall -g oh-my-opencode")
+  })
+})
+
+describe("repairLegacyOmoBins with a Codex Light runtime wrapper", () => {
+  test("#given a legacy Codex Light omo wrapper #when repairing #then the wrapper is removed and reported with its version", () => {
+    // given
+    const light = writeCodexLightRuntimeWrapper({ root: root("repair-light"), version: "4.19.4" })
+    mkdirSync(join(light.binDir, "..", "..", "bin"), { recursive: true })
+    const entries = scanOmoBins(environmentOf([light.binDir]))
+
+    // when
+    const repair = repairLegacyOmoBins(legacyOmoBins(entries), { isWindows: false })
+
+    // then
+    expect(existsSync(light.binPath)).toBe(false)
+    expect(repair.removed).toEqual([{ binPath: light.binPath, packageName: "lazycodex", packageVersion: "4.19.4" }])
+    expect(repair.notes.join("\n")).toContain("lazycodex@4.19.4")
   })
 })

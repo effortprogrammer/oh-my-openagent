@@ -48,3 +48,26 @@ export function writeGlobalPackageBin(options: GlobalBinFixtureOptions): GlobalB
 
   return { root: options.root, binDir, binPath: join(binDir, bins[0] ?? "omo"), packageDir }
 }
+
+/**
+ * Lays out the `omo` command the Codex Light installer of a pre-rename release wrote into
+ * `~/.local/bin`: a generated shell wrapper, not a package-manager link, that execs the CLI out of
+ * `<CODEX_HOME>/plugins/cache/sisyphuslabs/omo/<version>/`. The marker comment is what the Light
+ * installer itself matches on when it retires the wrapper.
+ */
+export function writeCodexLightRuntimeWrapper(options: {
+  readonly root: string
+  readonly version: string
+  readonly marker?: string
+}): { readonly binDir: string; readonly binPath: string } {
+  const binDir = join(options.root, ".local", "bin")
+  const cliPath = join(options.root, ".codex", "plugins", "cache", "sisyphuslabs", "omo", options.version, "dist", "cli", "index.js")
+  mkdirSync(binDir, { recursive: true })
+  const binPath = join(binDir, "omo")
+  writeFileSync(
+    binPath,
+    ["#!/bin/sh", `# ${options.marker ?? "OMO_GENERATED_RUNTIME_WRAPPER"}`, `exec bun "${cliPath}" "$@"`, ""].join("\n"),
+    { mode: 0o755 },
+  )
+  return { binDir, binPath }
+}
