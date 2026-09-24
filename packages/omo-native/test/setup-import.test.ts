@@ -40,6 +40,8 @@ const transcripts: string[] = []
 const secrets = [
   "SK-SENTINEL-DO-NOT-LOG-1", "SK-SENTINEL-DO-NOT-LOG-2",
   "SK-SENTINEL-DO-NOT-LOG-3", "SK-SENTINEL-DO-NOT-LOG-4",
+  "SK-SENTINEL-DO-NOT-LOG-5", "SK-SENTINEL-DO-NOT-LOG-6",
+  "SK-SENTINEL-DO-NOT-LOG-7",
 ]
 
 type Fixture = { root: string; home: string; agentDir: string; xdg: string; launcher: string }
@@ -148,14 +150,16 @@ afterEach(() => {
 })
 
 describe("omo setup credential inheritance", () => {
-  test("#given opencode api oauth mapped and gateway entries #when accepted #then only safe api ids import", () => {
+  test("#given opencode api oauth mapped and gateway entries #when accepted #then every usable api id imports", () => {
     const item = fixture()
     write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({
       google: { type: "api", key: secrets[0] },
       "anthropic-api": { type: "api", key: secrets[1] },
       xai: { type: "oauth", access: secrets[2] },
       opencode: { type: "api", key: secrets[3] },
-      "unknown-gateway": { type: "api", key: secrets[3] },
+      "opencode-go": { type: "api", key: secrets[4] },
+      "zai-coding-plan": { type: "api", key: secrets[5] },
+      "unknown-gateway": { type: "api", key: secrets[6] },
     }))
     const before = sourceSnapshot(item)
 
@@ -165,12 +169,45 @@ describe("omo setup credential inheritance", () => {
     expect(auth(item)).toEqual({
       google: { type: "api_key", key: secrets[0] },
       anthropic: { type: "api_key", key: secrets[1] },
+      opencode: { type: "api_key", key: secrets[3] },
+      "opencode-go": { type: "api_key", key: secrets[4] },
+      zai: { type: "api_key", key: secrets[5] },
     })
+    expect(result.stdout).toContain("imported: 5")
     expect(result.stdout).toContain("skipped-oauth: 1")
-    expect(result.stdout).toContain("skipped-unmapped: 2")
-    expect(result.stdout).toContain("xai")
-    expect(result.stdout).toContain("opencode")
+    expect(result.stdout).toContain("skipped-unmapped: 1")
+    expect(result.stdout).toContain("unknown-gateway")
     expectSourcesUntouched(before)
+  })
+
+  test("#given a skipped oauth provider #when setup reports #then it names the real sign-in command", () => {
+    const item = fixture()
+    write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({
+      openai: { type: "oauth", access: secrets[0] },
+      google: { type: "api", key: secrets[1] },
+    }))
+
+    const result = run(item, ["setup", "--yes"])
+
+    expect(result.status).toBe(0)
+    // `omo auth` only prints or checks stored credentials; the sign-in surface is /login.
+    expect(result.stdout).not.toContain("omo auth")
+    expect(result.stdout).toContain("/login chatgpt-subscription")
+  })
+
+  test("#given a dry run with skipped credentials #when setup previews #then the same guidance is shown", () => {
+    const item = fixture()
+    write(join(item.xdg, "opencode", "auth.json"), JSON.stringify({
+      openai: { type: "oauth", access: secrets[0] },
+      "unknown-gateway": { type: "api", key: secrets[1] },
+    }))
+
+    const result = run(item, ["setup", "--dry-run"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain("DRY RUN")
+    expect(result.stdout).toContain("/login chatgpt-subscription")
+    expect(result.stdout).toContain("models.json")
   })
 
   test.skipIf(!SQLITE_AVAILABLE)("#given pinned omp and gjc databases #when accepted #then allow-listed rows import and unknown schema is noticed", async () => {
