@@ -67,8 +67,10 @@ The baked catalog:
   later drift detection keep project instructions aligned with the codebase. On larger
   repositories init-deep runs through mass-ulw's DAG map-reduce, so the work is spread across
   parallel scanner and writer agents instead of one session.
-- **Tips with a live source of truth**: run `senpi --list-tips` during the tour, then read and
-  follow `give-me-tips` for any visible tip the user wants explained from the implementation.
+- **Tips with a live source of truth**: list the tips with the command this product is installed
+  as - `omo --list-tips` on OmO Native (omo-ai installs, where `senpi` is not on PATH) or `senpi
+  --list-tips` on a plain senpi install - then read and follow `give-me-tips` for any visible tip
+  the user wants explained from the implementation.
 - **Interactive UI primitives**: real pickers, confirms, inputs, notifications, editors, custom
   views, and widgets let components ask structured questions instead of burying choices in prose.
 - **Re-running this tour**: onboarding auto-starts once, ever. The user can bring it back any time

@@ -1,3 +1,15 @@
+## skills: the list-tips instruction names the command the running product actually ships
+
+`skills/give-me-tips/SKILL.md`, `skills/onboarding/SKILL.md`, and `skills/AGENTS.md` told the
+agent to run `senpi --list-tips`, but an OmO Native machine (a bun/npm global `omo-ai` install)
+links only the top-level `omo` bin - `@code-yeongyu/senpi` arrives as a dependency, so `senpi`
+is not on PATH and the instructed command failed when first-run onboarding tried to list tips.
+The skills now instruct the brand command of the product that is running: `omo --list-tips`
+under OmO Native (the omo launcher passes unknown flags through to the engine, and the session
+environment carries the `OMO_NATIVE=1` / `OMO_BIN` markers the skill tells the agent to detect),
+`senpi --list-tips` under a plain senpi install, with `"$OMO_BIN" --list-tips` as the fallback
+when `omo` itself is not on PATH (bunx/npx launches).
+
 ## ulw-research: deliverable lane interview, static gates, outcome manifest, and bounded repair
 
 `skills/ulw-research/SKILL.md` replaces the always-ask format-proposal gate with the deliverable lane and
