@@ -67,7 +67,7 @@ describe("the nudge reaches the real toast surface", () => {
     expect(surface.toasts).toHaveLength(1)
     expect(surface.toasts[0]?.title).toBe(NATIVE_NUDGE_TOAST_TITLE)
     expect(surface.toasts[0]?.message).toBe(NATIVE_NUDGE_TOAST_MESSAGE)
-    expect(surface.toasts[0]?.message).toContain("bun add -g omo-ai@beta")
+    expect(surface.toasts[0]?.message).toContain("bunx oh-my-openagent install --platform=native")
   })
 
   test("#given repeated session events in one process #when they fire #then the toast is shown exactly once", async () => {

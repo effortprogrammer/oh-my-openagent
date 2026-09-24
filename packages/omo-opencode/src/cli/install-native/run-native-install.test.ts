@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
-import { describe, expect, test } from "bun:test"
+import { existsSync, rmSync } from "node:fs"
+import { afterEach, describe, expect, test } from "bun:test"
 import {
   NATIVE_RECOMMENDED_RUNTIME_NOTE,
   NATIVE_SETUP_COMMAND,
@@ -8,17 +9,41 @@ import {
   nativeInstallSuccessLine,
   runNativeInstall,
 } from "./index"
-import type { NativeInstallSpawnResult } from "./index"
+import type { NativeInstallSpawnResult, OmoBinEnvironment } from "./index"
+import { createBinFixtureRoot, writeGlobalPackageBin } from "./omo-bin-test-fixtures"
 
 interface SpawnCall {
   readonly command: string
   readonly args: readonly string[]
 }
 
-function recordingSpawn(result: NativeInstallSpawnResult | (() => never)) {
+const roots: string[] = []
+
+function root(label: string): string {
+  const created = createBinFixtureRoot(label)
+  roots.push(created)
+  return created
+}
+
+afterEach(() => {
+  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true })
+})
+
+function environmentOf(pathDirectories: readonly string[]): OmoBinEnvironment {
+  return { pathDirectories, extraDirectories: [], isWindows: false }
+}
+
+function emptyEnvironment(): OmoBinEnvironment {
+  return environmentOf([root("empty")])
+}
+
+const probeMissing = async () => ({ exitCode: 127, stdout: "" })
+
+function recordingSpawn(result: NativeInstallSpawnResult | (() => never), onSpawn?: () => void) {
   const calls: SpawnCall[] = []
   const spawn = async (command: string, args: readonly string[]) => {
     calls.push({ command, args })
+    onSpawn?.()
     if (typeof result === "function") return result()
     return result
   }
@@ -31,7 +56,12 @@ describe("runNativeInstall", () => {
     const { calls, spawn } = recordingSpawn({ exitCode: 0 })
 
     // when
-    const outcome = await runNativeInstall({ isBunAvailable: () => true, spawn })
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => true,
+      spawn,
+      environment: emptyEnvironment(),
+      probeVersion: probeMissing,
+    })
 
     // then
     expect(calls).toEqual([{ command: "bun", args: ["add", "-g", "omo-ai@beta"] }])
@@ -44,7 +74,12 @@ describe("runNativeInstall", () => {
     const { calls, spawn } = recordingSpawn({ exitCode: 0 })
 
     // when
-    const outcome = await runNativeInstall({ isBunAvailable: () => false, spawn })
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => false,
+      spawn,
+      environment: emptyEnvironment(),
+      probeVersion: probeMissing,
+    })
 
     // then
     expect(calls).toEqual([{ command: "npm", args: ["i", "-g", "omo-ai@beta"] }])
@@ -57,7 +92,12 @@ describe("runNativeInstall", () => {
     const { spawn } = recordingSpawn({ exitCode: 7, stderr: "EACCES: permission denied" })
 
     // when
-    const outcome = await runNativeInstall({ isBunAvailable: () => true, spawn })
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => true,
+      spawn,
+      environment: emptyEnvironment(),
+      probeVersion: probeMissing,
+    })
 
     // then
     expect(outcome.ok).toBe(false)
@@ -73,7 +113,12 @@ describe("runNativeInstall", () => {
     })
 
     // when
-    const outcome = await runNativeInstall({ isBunAvailable: () => false, spawn })
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => false,
+      spawn,
+      environment: emptyEnvironment(),
+      probeVersion: probeMissing,
+    })
 
     // then
     expect(outcome.ok).toBe(false)
@@ -82,11 +127,79 @@ describe("runNativeInstall", () => {
   })
 })
 
+describe("runNativeInstall legacy omo bin", () => {
+  test("#given a legacy global omo #when the native edition is installed #then the stale shim is gone before the package manager runs", async () => {
+    // given
+    const legacy = writeGlobalPackageBin({
+      root: root("wire-legacy"),
+      packageName: "oh-my-openagent",
+      version: "4.19.4",
+      bins: ["omo", "oh-my-openagent"],
+    })
+    const native = writeGlobalPackageBin({
+      root: root("wire-native-target"),
+      packageName: "omo-ai",
+      version: "5.0.0-0.beta.89",
+    })
+    rmSync(native.binPath)
+    let legacyBinAtSpawnTime = true
+    const { spawn } = recordingSpawn({ exitCode: 0 }, () => {
+      legacyBinAtSpawnTime = existsSync(legacy.binPath)
+      writeGlobalPackageBin({ root: native.root, packageName: "omo-ai", version: "5.0.0-0.beta.89" })
+    })
+
+    // when
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => true,
+      spawn,
+      environment: environmentOf([legacy.binDir, native.binDir]),
+      probeVersion: async () => ({ exitCode: 0, stdout: "omo 5.0.0-0.beta.89 (engine: senpi 0.9.1)\n" }),
+    })
+
+    // then
+    expect(legacyBinAtSpawnTime).toBe(false)
+    expect(existsSync(legacy.binPath)).toBe(false)
+    expect(existsSync(`${legacy.binDir}/oh-my-openagent`)).toBe(true)
+    expect(outcome.notes.join("\n")).toContain("oh-my-openagent@4.19.4")
+    expect(outcome.ok).toBe(true)
+    expect(outcome.verified).toBe(true)
+    expect(outcome.warnings).toEqual([])
+  })
+
+  test("#given an unrelated omo keeps resolving first #when the native edition is installed #then the install still succeeds and the PATH fix is reported", async () => {
+    // given
+    const foreign = writeGlobalPackageBin({ root: root("wire-foreign"), packageName: "omo-tools", version: "1.2.3" })
+    const nativeRoot = root("wire-native")
+    const { spawn } = recordingSpawn({ exitCode: 0 }, () => {
+      writeGlobalPackageBin({ root: nativeRoot, packageName: "omo-ai", version: "5.0.0-0.beta.89" })
+    })
+
+    // when
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => true,
+      spawn,
+      environment: environmentOf([foreign.binDir, `${nativeRoot}/bin`]),
+      probeVersion: async () => ({ exitCode: 0, stdout: "omo-tools 1.2.3\n" }),
+    })
+
+    // then
+    expect(existsSync(foreign.binPath)).toBe(true)
+    expect(outcome.ok).toBe(true)
+    expect(outcome.verified).toBe(false)
+    expect(outcome.warnings.join("\n")).toContain(`export PATH="${nativeRoot}/bin:$PATH"`)
+  })
+})
+
 describe("native install messages", () => {
   test("#given a successful npm install #when the outcome is rendered #then it carries the bun note and points at omo setup", async () => {
     // given
     const { spawn } = recordingSpawn({ exitCode: 0 })
-    const outcome = await runNativeInstall({ isBunAvailable: () => false, spawn })
+    const outcome = await runNativeInstall({
+      isBunAvailable: () => false,
+      spawn,
+      environment: emptyEnvironment(),
+      probeVersion: probeMissing,
+    })
 
     // when
     const rendered = [...outcome.notes, nativeInstallSuccessLine()]
@@ -108,5 +221,20 @@ describe("native install messages", () => {
     expect(lines.join("\n")).toContain("npm i -g omo-ai@beta")
     expect(lines.join("\n")).toContain("npm exited with code 1")
     expect(lines.join("\n")).toContain(NATIVE_SETUP_COMMAND)
+  })
+
+  test("#given the legacy shim could not be removed #when the install fails #then the failure lines carry the manual cleanup", () => {
+    // given
+    const failure = {
+      reason: "npm exited with code 1: EEXIST: file already exists",
+      manualCommand: "npm i -g omo-ai@beta",
+      hints: ['Remove the stale omo command first: rm "/usr/local/bin/omo"'],
+    }
+
+    // when
+    const lines = nativeInstallFailureLines(failure)
+
+    // then
+    expect(lines.join("\n")).toContain('rm "/usr/local/bin/omo"')
   })
 })

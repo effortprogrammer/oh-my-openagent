@@ -1,3 +1,5 @@
+import { PUBLISHED_PACKAGE_NAME } from "../../shared"
+
 export const NATIVE_PACKAGE_SPEC = "omo-ai@beta"
 export const NATIVE_SETUP_COMMAND = "omo setup"
 export const NATIVE_RECOMMENDED_RUNTIME_NOTE =
@@ -22,4 +24,14 @@ export function resolveNativeInstallPlan(bunAvailable: boolean): NativeInstallPl
 
 export function formatNativeInstallCommand(plan: NativeInstallPlan): string {
   return [plan.command, ...plan.args].join(" ")
+}
+
+/**
+ * The command every user-facing surface advertises. It is the raw package install plus the parts a
+ * raw install cannot do: clearing a stale global `omo` left by a pre-rename release, and checking
+ * that the `omo` PATH resolves afterwards is the one omo-ai owns.
+ */
+export function formatNativeInstallEntryCommand(plan: NativeInstallPlan): string {
+  const runner = plan.packageManager === "bun" ? "bunx" : "npx"
+  return `${runner} ${PUBLISHED_PACKAGE_NAME} install --platform=native`
 }

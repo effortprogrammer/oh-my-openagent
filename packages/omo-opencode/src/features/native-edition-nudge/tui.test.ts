@@ -44,7 +44,7 @@ describe("the dialog offers every action the issue asks for", () => {
 })
 
 describe("install hands over the command without claiming the user migrated", () => {
-  test("#given bun is available #when install is chosen #then the bun command is returned and no state is written", () => {
+  test("#given bun is available #when install is chosen #then the bunx installer command is returned and no state is written", () => {
     // given
     const fake = store()
 
@@ -52,12 +52,12 @@ describe("install hands over the command without claiming the user migrated", ()
     const result = applyNativeEditionNudgeAction("install", { store: fake.store, now: NOW, bunAvailable: true })
 
     // then
-    expect(result.toast).toContain("bun add -g omo-ai@beta")
+    expect(result.toast).toContain("bunx oh-my-openagent install --platform=native")
     expect(result.toast).toContain("omo setup")
     expect(fake.writes).toHaveLength(0)
   })
 
-  test("#given bun is absent #when install is chosen #then the npm fallback command is returned", () => {
+  test("#given bun is absent #when install is chosen #then the npx fallback command is returned", () => {
     // given
     const fake = store()
 
@@ -65,7 +65,7 @@ describe("install hands over the command without claiming the user migrated", ()
     const result = applyNativeEditionNudgeAction("install", { store: fake.store, now: NOW, bunAvailable: false })
 
     // then
-    expect(result.toast).toContain("npm i -g omo-ai@beta")
+    expect(result.toast).toContain("npx oh-my-openagent install --platform=native")
   })
 })
 

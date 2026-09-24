@@ -171,11 +171,12 @@ export async function runCliInstaller(args: InstallArgs, version: string): Promi
   if (config.hasNative) {
     printInfo("Installing OmO Native...")
     const outcome = await runNativeInstall()
+    for (const note of outcome.notes) printInfo(note)
+    for (const warning of outcome.warnings) printWarning(warning)
     if (outcome.failure) {
       for (const line of nativeInstallFailureLines(outcome.failure)) printError(line)
       return 1
     }
-    for (const note of outcome.notes) printInfo(note)
     printSuccess(nativeInstallSuccessLine())
     console.log()
   }

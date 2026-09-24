@@ -155,12 +155,15 @@ export async function runTuiInstaller(args: InstallArgs, version: string): Promi
     const outcome = await runNativeInstall()
     if (outcome.failure) {
       spinner.stop(`OmO Native install failed ${color.yellow("[!]")}`)
+      for (const note of outcome.notes) p.log.info(note)
+      for (const warning of outcome.warnings) p.log.warn(warning)
       for (const line of nativeInstallFailureLines(outcome.failure)) p.log.error(line)
       p.outro(color.red("Installation failed."))
       return 1
     }
     spinner.stop(nativeInstallSuccessLine())
     for (const note of outcome.notes) p.log.info(note)
+    for (const warning of outcome.warnings) p.log.warn(warning)
   }
 
   if (config.hasNativeDev) {
