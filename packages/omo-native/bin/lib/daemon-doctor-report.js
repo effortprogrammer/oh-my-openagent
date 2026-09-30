@@ -8,6 +8,7 @@ import { formatDoctorLines } from "./daemon-status.js"
  * it just has nothing shared to report. Returned as lines so doctor can place it with the rest.
  */
 export function daemonReportLines(options) {
+  if (options.platform === "win32") return ["INFO Daemon: unavailable on win32 (no unix socket to share)"]
   const configLines = daemonConfigDoctorLines({
     pluginRoot: options.pluginRoot,
     agentDir: options.agentDir,
@@ -18,8 +19,7 @@ export function daemonReportLines(options) {
   return [...engineReportLines(options), ...configLines]
 }
 
-function engineReportLines({ engine, agentDir, env, platform }) {
-  if (platform === "win32") return ["INFO Daemon: unavailable on win32 (no unix socket to share)"]
+function engineReportLines({ engine, agentDir, env }) {
   const all = readAllEndpoints(engine, agentDir, env)
   if (all.kind === "all") {
     if (all.endpoints.length === 0) return ["INFO Daemon: not running"]

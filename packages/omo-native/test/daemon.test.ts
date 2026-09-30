@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -191,18 +191,27 @@ describe("omo daemon", () => {
     expect(stderr.text()).toContain("win32")
   })
 
-  test("doctor reports one honest win32 line without probing the engine", () => {
+  test("doctor on win32 skips legacy config diagnostics and engine probing", () => {
+    // given
+    const { pluginRoot, agentDir } = workspace({ task: { host_idle_exit_ms: 900_000 } })
     const engine = fakeEngine({ exitCode: 0, stdout: "" })
+    const loadTaskConfig = mock(() => ({ resolveDaemonTaskSettings: () => ({}) }))
 
+    // when
     const lines = daemonReportLines({
       engine,
-      pluginRoot: "/p",
-      agentDir: "/a",
+      pluginRoot,
+      agentDir,
       env: {},
       platform: "win32",
+      loadTaskConfig,
     })
 
-    expect(lines).toEqual(["INFO Daemon: unavailable on win32 (no unix socket to share)"])
+    // then
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/^INFO Daemon:.*win32/)
+    expect(lines.some((line) => line.startsWith("WARN"))).toBe(false)
+    expect(loadTaskConfig).not.toHaveBeenCalled()
     expect(engine.calls).toHaveLength(0)
   })
 
