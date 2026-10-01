@@ -17,6 +17,7 @@ export type StoreExtensionRefusalCode =
   | "extension_schema_violation"
   | "extension_operation_failed"
   | "extension_notification_failed"
+  | "extension_disabled"
   | "gateway_lock_wait_exceeded"
   | "gateway_schema_too_new"
 

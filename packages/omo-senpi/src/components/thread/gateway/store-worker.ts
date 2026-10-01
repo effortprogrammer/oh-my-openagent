@@ -47,8 +47,15 @@ const resolveTarget: GatewayResolve = (address, request) => new Promise((resolve
 })
 
 function lateTransactionError(error: unknown): void {
-  if (!(error instanceof ExtensionTransactionEndedError)) throw error
-  emit({ kind: "extension_error", extension: error.extension, phase: "stale_transaction", error: error.message })
+  if (error instanceof ExtensionTransactionEndedError) {
+    emit({ kind: "extension_error", extension: error.extension, phase: "stale_transaction", error: error.message })
+    return
+  }
+  const owners = extensions?.containLateError(error) ?? []
+  if (owners.length === 0) throw error
+  for (const extension of owners) {
+    emit({ kind: "extension_error", extension, phase: "async_failure", error: error instanceof Error ? error.message : String(error) })
+  }
 }
 
 process.on("uncaughtException", lateTransactionError)

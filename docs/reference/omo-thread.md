@@ -204,8 +204,8 @@ earlier work must throw. Catching an error from `all`, `one` or `exec` does not 
 the whole call still rolls back, including for a caught constraint error.
 
 Refusal codes are `extension_import_failed`, `extension_unknown_op`, `extension_unknown_name`,
-`extension_schema_violation`, `extension_notification_failed`, `gateway_lock_wait_exceeded`, and
-`gateway_schema_too_new`.
+`extension_schema_violation`, `extension_notification_failed`, `extension_disabled`,
+`gateway_lock_wait_exceeded`, and `gateway_schema_too_new`.
 Invalid registration input and uncloneable call arguments are `invalid_arguments`; a thrown
 operation or expired operation deadline is `extension_operation_failed`. The worker keeps
 serving core requests after operation refusals on a supported database. Reserved names, unowned object access, triggers,
@@ -218,6 +218,17 @@ JavaScript that blocks the worker's event loop. Using a retained `tx` after the 
 returns throws a typed error (async helpers reject); an unhandled expired-transaction error
 is reported as an `extension_error` event with phase `stale_transaction`, without killing
 the worker.
+
+An uncaught exception or unhandled rejection raised later by an extension's own timers or
+promises does not close the store. The worker attributes it to every extension whose
+registered module file appears in the error's stack, emits an `extension_error` event with
+phase `async_failure` for each, and disables those extensions for the life of the worker:
+later registration and calls return `extension_disabled`, while core operations and other
+extensions keep serving. If the failing extension's operation is still running, it is refused
+and rolled back. Extensions registered from the same module file are disabled together. An
+error whose stack names no registered module file (a non-`Error` value, an error thrown from a
+helper module, or a Node callback error without JavaScript frames) cannot be attributed and
+still ends the worker, as before. Starting a new store process re-enables the extension.
 
 A core schema newer than this binary supports is refused with `gateway_schema_too_new`
 without applying migrations or lowering `user_version`. Extension registration/calls return

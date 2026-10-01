@@ -1,4 +1,5 @@
 import { extname } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { assertExtensionName, checkExtensionSchema, ExtensionSchemaViolation, extensionSchema, extensionSql, sqliteName } from "./extension-sql"
 import { extensionTransaction } from "./extension-transaction"
@@ -27,10 +28,33 @@ function fromError(error: unknown): StoreExtensionRefusal {
 
 export class StoreExtensions {
   private readonly registered = new Map<string, Registered>()
+  private readonly modules = new Map<string, { readonly path: string; readonly href: string }>()
+  private readonly disabled = new Map<string, StoreExtensionRefusal>()
+  private active: { readonly name: string; readonly fail: (error: unknown) => void } | undefined
+
+  /**
+   * Disables every registered extension whose module file appears in a late error's stack, and fails
+   * its in-flight call. Bun does not carry async context into the worker's fatal-error handlers, so
+   * the stack frame of the registered module is the provenance that survives.
+   */
+  containLateError(error: unknown): readonly string[] {
+    if (!(error instanceof Error) || error.stack === undefined) return []
+    const owners: string[] = []
+    const frames = error.stack.split("\n")
+    for (const [name, module] of this.modules) {
+      if (!frames.some((frame) => frame.includes(`${module.path}:`) || frame.includes(`${module.href}:`))) continue
+      owners.push(name)
+      this.disabled.set(name, refusal("extension_disabled", `Extension ${name} was disabled after an asynchronous failure: ${error.message}`))
+      if (this.active?.name === name) this.active.fail(error)
+    }
+    return owners
+  }
 
   constructor(private readonly ctx: StoreContext, private readonly resolveTarget: GatewayResolve) {}
 
   async register(descriptor: StoreExtensionRegistration, now: number): Promise<StoreExtensionResult<{ readonly version: number }>> {
+    const disabled = this.disabled.get(descriptor.name)
+    if (disabled !== undefined) return disabled
     if (!/^[a-z][a-z0-9_]{1,31}$/.test(descriptor.name) || !Array.isArray(descriptor.migrations)
       || !descriptor.migrations.every((step) => Array.isArray(step) && step.every((sql) => typeof sql === "string"))) {
       return refusal("invalid_arguments", "An extension needs a valid namespace and an array of SQL migration steps.")
@@ -46,10 +70,13 @@ export class StoreExtensions {
       if (url.protocol !== "file:" || ![".js", ".mjs", ".cjs"].includes(extname(url.pathname))) {
         return refusal("extension_import_failed", "moduleUrl must name a compiled JavaScript file URL.")
       }
+      this.modules.set(descriptor.name, { path: fileURLToPath(url), href: url.href })
       module = await import(descriptor.moduleUrl)
     } catch (error) {
       return refusal("extension_import_failed", `Cannot import extension ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`)
     }
+    const failedImport = this.disabled.get(descriptor.name)
+    if (failedImport !== undefined) return failedImport
     this.registered.set(descriptor.name, { descriptor, module })
     try {
       return { kind: "ok", value: { version: await this.ensure(descriptor, now) } }
@@ -87,6 +114,8 @@ export class StoreExtensions {
   }
 
   async call(name: string, op: string, args: unknown, now: number): Promise<StoreExtensionResult<unknown>> {
+    const disabled = this.disabled.get(name)
+    if (disabled !== undefined) return disabled
     const entry = this.registered.get(name)
     if (entry === undefined) return refusal("extension_unknown_name", `No store extension is registered as ${name}.`)
     const operation = Object.hasOwn(entry.module, op) ? entry.module[op] : undefined
@@ -113,12 +142,16 @@ export class StoreExtensions {
               reject(new Error(`Extension ${name}.${op} exceeded its ${this.ctx.config.lock_wait_max_ms} ms operation budget.`))
             }, this.ctx.config.lock_wait_max_ms)
           })
-          const result = await Promise.race([run(), deadline])
+          const failed = new Promise<never>((_resolve, reject) => {
+            this.active = { name, fail: (error) => { scope.cancel(); reject(error) } }
+          })
+          const result = await Promise.race([run(), deadline, failed])
           checkExtensionSchema(this.ctx.sql, name, before, extensionSchema(this.ctx.sql))
           // Refuse uncloneable results before commit, not in the worker's response writer afterwards.
           return structuredClone(result)
         } finally {
           clearTimeout(timer)
+          this.active = undefined
           scope.cancel()
         }
       })
