@@ -76,7 +76,7 @@ export function summary(session: ThreadHostSession, entry?: AddressEntry): Threa
  * reaches one endpoint is that endpoint's listing, exactly as before endpoints were enumerated.
  * With `offline`, an endpoint that does not answer is a host without sessions, never a throw.
  */
-export async function hostView(options: ThreadToolSurfaceOptions, request: ThreadHostViewRequest = {}): Promise<ThreadHostView> {
+export async function hostView(options: Omit<ThreadToolSurfaceOptions, "store">, request: ThreadHostViewRequest = {}): Promise<ThreadHostView> {
   if (options.host.listView !== undefined) return await options.host.listView(request)
   let sessions: readonly ThreadHostSession[]
   try {
@@ -88,7 +88,7 @@ export async function hostView(options: ThreadToolSurfaceOptions, request: Threa
   return { sessions, hosts: [{ socket: options.host.socket, list_sessions: { sessions } }], disk: [] }
 }
 
-export function addressBook(options: ThreadToolSurfaceOptions, view: ThreadHostView, extra: readonly DiskSession[] = []): AddressEntry[] {
+export function addressBook(options: Omit<ThreadToolSurfaceOptions, "store">, view: ThreadHostView, extra: readonly DiskSession[] = []): AddressEntry[] {
   return assembleAddressBook(view.hosts, [...(options.diskSessions?.() ?? []), ...view.disk, ...extra], { facts: readSessionFacts })
 }
 
@@ -99,7 +99,7 @@ export function addressBook(options: ThreadToolSurfaceOptions, view: ThreadHostV
  * name; its entry has no endpoint, so the gateway queues the send offline. Ambiguity and scope are
  * judged over the same entries as always.
  */
-export function sendAddressBook(options: ThreadToolSurfaceOptions, view: ThreadHostView, address: string, allScope?: boolean): AddressEntry[] {
+export function sendAddressBook(options: Omit<ThreadToolSurfaceOptions, "store">, view: ThreadHostView, address: string, allScope?: boolean): AddressEntry[] {
   const book = addressBook(options, view)
   const sessionsDirectory = options.sessionsDirectory?.()
   if (sessionsDirectory === undefined || address === "self") return book
