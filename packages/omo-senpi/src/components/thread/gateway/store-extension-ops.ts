@@ -5,7 +5,7 @@ import { extensionTransaction } from "./extension-transaction"
 import { singleExtensionStatement } from "./extension-statement"
 import type { GatewayResolve } from "./engine"
 import { isLockWaitExceeded } from "./lock-wait"
-import { transaction, type StoreContext } from "./store-ops"
+import { ExtensionNotificationError, transaction, type StoreContext } from "./store-ops"
 import type { StoreExtensionOperation, StoreExtensionRefusal, StoreExtensionRegistration, StoreExtensionResult } from "./store-extensions"
 
 type Registered = {
@@ -20,6 +20,7 @@ function refusal(code: StoreExtensionRefusal["code"], message: string): StoreExt
 function fromError(error: unknown): StoreExtensionRefusal {
   const message = error instanceof Error ? error.message : String(error)
   if (error instanceof ExtensionSchemaViolation) return refusal(error.code, message)
+  if (error instanceof ExtensionNotificationError) return refusal(error.code, message)
   if (isLockWaitExceeded(error)) return refusal("gateway_lock_wait_exceeded", message)
   return refusal("extension_operation_failed", message)
 }
@@ -91,11 +92,12 @@ export class StoreExtensions {
     const operation = Object.hasOwn(entry.module, op) ? entry.module[op] : undefined
     if (typeof operation !== "function") return refusal("extension_unknown_op", `Extension ${name} exports no operation ${op}.`)
     const effects: (() => void)[] = []
+    const rollback: (() => void)[] = []
     try {
       await this.ensure(entry.descriptor, now)
       const value = await transaction(this.ctx, "extension_call", async () => {
         const before = extensionSchema(this.ctx.sql)
-        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects }, name, now, this.resolveTarget)
+        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects, afterRollback: rollback }, name, now, this.resolveTarget)
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
           const run = async () => {
@@ -120,15 +122,20 @@ export class StoreExtensions {
           scope.cancel()
         }
       })
+      rollback.length = 0
+      const notificationErrors: string[] = []
       for (const effect of effects) {
         try {
           effect()
         } catch (error) {
-          this.ctx.emit({ kind: "extension_error", extension: name, phase: "after_commit", error: error instanceof Error ? error.message : String(error) })
+          const message = error instanceof Error ? error.message : String(error)
+          notificationErrors.push(message)
+          this.ctx.emit({ kind: "extension_error", extension: name, phase: "after_commit", error: message })
         }
       }
-      return { kind: "ok", value }
+      return { kind: "ok", value, ...(notificationErrors.length === 0 ? {} : { notification_errors: notificationErrors }) }
     } catch (error) {
+      for (const cleanup of rollback) cleanup()
       return fromError(error)
     }
   }

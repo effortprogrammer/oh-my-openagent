@@ -162,7 +162,8 @@ Operations run in one `BEGIN IMMEDIATE`. The transaction surface is:
   including resolution through its shared live-and-disk address book, author-specific rate
   limits, mode ceiling and idempotency. A missing target returns `not_found`, just as relay
   inbound does. It does not wake a live endpoint before commit. Enqueue requires a binding;
-  there is no `enqueueToSession` operation.
+  there is no `enqueueToSession` operation. The filesystem wake marker is created before commit;
+  the receiver's transaction waits for the writer before reading the queued delivery.
   `deliveries.actor_user_id` records `author.user_id`, or NULL without it.
 - `bind({ principal, binding, idempotency_key? })`, `unbind({ principal, binding_id,
   expected_revision, idempotency_key? })`, `rebind({ principal, binding_id, expected_revision,
@@ -190,16 +191,21 @@ Transaction-control SQL, PRAGMAs and attached/temporary databases are refused. T
 sources such as `json_each` and `pragma_table_info` are not owned objects and are refused.
 This is a store API contract, not a sandbox for untrusted JavaScript modules.
 
-A thrown operation rolls back extension rows and joined core writes together. Inbox/outbox
-marker writes and removals run only after COMMIT; rollback publishes no marker. Each
-post-commit effect runs independently: a failed marker emits an `extension_error` store event
-with phase `after_commit`, does not skip later effects, and does not turn committed data into
-a refused call. A returned relay refusal is data, so an operation that wants to undo its
+A thrown operation rolls back extension rows and joined core writes together. Inbox
+marker writes happen while the transaction's write lock is held, before COMMIT, so a crash
+after commit cannot leave committed deliveries without their wake markers. Rollback removes
+new inbox markers; a process exit before commit may leave a harmless spurious wake, as in core operations.
+A failed marker write rolls back the operation with `extension_notification_failed`.
+Marker removals run only after COMMIT. Each removal runs independently: a failure emits an
+`extension_error` store event with phase `after_commit` and appears in the successful call's
+optional `notification_errors` array. The committed `value` stays successful; do not retry it
+as though its transaction had been refused. A returned relay refusal is data, so an operation that wants to undo its
 earlier work must throw. Catching an error from `all`, `one` or `exec` does not clear it:
 the whole call still rolls back, including for a caught constraint error.
 
 Refusal codes are `extension_import_failed`, `extension_unknown_op`, `extension_unknown_name`,
-`extension_schema_violation`, `gateway_lock_wait_exceeded`, and `gateway_schema_too_new`.
+`extension_schema_violation`, `extension_notification_failed`, `gateway_lock_wait_exceeded`, and
+`gateway_schema_too_new`.
 Invalid registration input and uncloneable call arguments are `invalid_arguments`; a thrown
 operation or expired operation deadline is `extension_operation_failed`. The worker keeps
 serving core requests after operation refusals on a supported database. Reserved names, unowned object access, triggers,

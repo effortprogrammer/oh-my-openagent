@@ -65,6 +65,14 @@ export type StoreContext = {
   readonly delay: (ms: number) => Promise<void>
   /** Present only on a context joining an extension's outer transaction. */
   readonly afterCommit?: (() => void)[]
+  readonly afterRollback?: (() => void)[]
+}
+
+export class ExtensionNotificationError extends Error {
+  readonly code = "extension_notification_failed"
+  constructor(error: unknown) {
+    super(`Extension notification failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const DELIVERY_COLUMNS = [
@@ -185,10 +193,6 @@ export async function transaction<T>(ctx: StoreContext, op: string, body: () => 
 
 function createMarker(ctx: StoreContext, targetDurableId: string, deliveryId: string, allowExisting: boolean): string {
   const directory = gatewayInboxDirectory(ctx.config.agent_dir, targetDurableId)
-  if (ctx.afterCommit !== undefined) {
-    ctx.afterCommit.push(() => createMarker({ ...ctx, afterCommit: undefined }, targetDurableId, deliveryId, allowExisting))
-    return join(directory, deliveryId)
-  }
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const path = join(directory, deliveryId)
   let fd: number
@@ -198,6 +202,7 @@ function createMarker(ctx: StoreContext, targetDurableId: string, deliveryId: st
     if (allowExisting && error instanceof Error && "code" in error && error.code === "EEXIST") return path
     throw error
   }
+  ctx.afterRollback?.push(() => rmSync(path, { force: true }))
   try {
     writeSync(fd, JSON.stringify({ pid: ctx.self.pid, process_start_time: ctx.self.process_start_time }))
   } finally {
@@ -507,7 +512,12 @@ export async function enqueue(ctx: StoreContext, request: EnqueueRequest): Promi
       request.sender_principal, request.receipt.idempotency_key, request.receipt.args_hash, row.delivery_id, ctx.config.instance_id,
       request.now, request.now, request.now + GATEWAY_RECEIPT_RETENTION_MS,
     ])
-    marker = createMarker(ctx, row.target_durable_id, row.delivery_id, false)
+    try {
+      marker = createMarker(ctx, row.target_durable_id, row.delivery_id, false)
+    } catch (error) {
+      if (ctx.afterCommit !== undefined) throw new ExtensionNotificationError(error)
+      throw error
+    }
     const position = queuePosition(ctx, row)
     if (ctx.afterCommit === undefined) await ctx.hook("beforeDbCommit")
     ctx.sql.exec(commitSql)
@@ -518,7 +528,7 @@ export async function enqueue(ctx: StoreContext, request: EnqueueRequest): Promi
     if (!committed) {
       rollbackQuietly(ctx)
       if (ctx.afterCommit !== undefined) ctx.afterCommit.length = effectsAtStart
-      else if (marker !== null) rmSync(marker, { force: true })
+      if (marker !== null) rmSync(marker, { force: true })
     }
     throw error
   }

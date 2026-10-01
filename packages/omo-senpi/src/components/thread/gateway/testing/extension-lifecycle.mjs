@@ -1,4 +1,5 @@
 export * from "./store-extension.mjs"
+import { existsSync, readdirSync } from "node:fs"
 
 let retained
 
@@ -38,6 +39,11 @@ export async function enqueuePair(tx, bindings) {
     results.push(await tx.enqueue({ binding_id: bound.binding.binding_id, event_id: binding.binding.chat_id, text: "hello" }))
   }
   return results
+}
+
+export async function enqueueAndInspect(tx, args) {
+  await enqueuePair(tx, [args.binding])
+  return { markers: existsSync(args.inbox) ? readdirSync(args.inbox).length : 0 }
 }
 
 export function unawaitedEnqueue(tx, request) {

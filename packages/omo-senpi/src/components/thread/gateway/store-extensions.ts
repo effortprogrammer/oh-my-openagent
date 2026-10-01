@@ -16,6 +16,7 @@ export type StoreExtensionRefusalCode =
   | "extension_unknown_name"
   | "extension_schema_violation"
   | "extension_operation_failed"
+  | "extension_notification_failed"
   | "gateway_lock_wait_exceeded"
   | "gateway_schema_too_new"
 
@@ -26,7 +27,7 @@ export type StoreExtensionRefusal = {
 }
 
 export type StoreExtensionResult<T> =
-  | { readonly kind: "ok"; readonly value: T }
+  | { readonly kind: "ok"; readonly value: T; readonly notification_errors?: readonly string[] }
   | StoreExtensionRefusal
 
 export type StoreExtensionTransaction = {
