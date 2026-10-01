@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite"
+import { DatabaseSync } from "node:sqlite"
 import assert from "node:assert/strict"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -20,7 +20,20 @@ try {
     const columns = name === "omo_gateway" ? "id TEXT PRIMARY KEY, value TEXT UNIQUE" : "id INTEGER PRIMARY KEY, value TEXT"
     assert.deepEqual(await sdk.registerStoreExtension({ name, moduleUrl, migrations: [[`CREATE TABLE ${name}_items (${columns})`]] }), { kind: "ok", value: { version: 1 } })
   }
+  assert.deepEqual(await sdk.registerStoreExtension({
+    name: "composite", moduleUrl,
+    migrations: [["CREATE TABLE composite_items (account TEXT, id TEXT, value TEXT UNIQUE, PRIMARY KEY (account, id))"]],
+  }), { kind: "ok", value: { version: 1 } })
+  assert.equal((await sdk.extensionCall("composite", "sql", { sql: "INSERT INTO composite_items VALUES ('account', 'one', 'unique')" })).kind, "ok")
+  for (const sql of [
+    "INSERT INTO composite_items VALUES ('account', 'one', 'other')",
+    "INSERT INTO composite_items VALUES ('account', 'two', 'unique')",
+  ]) assert.equal((await sdk.extensionCall("composite", "sql", { sql })).code, "extension_operation_failed")
   assert.deepEqual(await sdk.extensionCall("omo_gateway", "put", { name: "omo_gateway", id: "one", value: "compiled SDK" }), { kind: "ok", value: { value: "compiled SDK" } })
+  for (const sql of [
+    "INSERT INTO omo_gateway_items VALUES ('one', 'duplicate primary key')",
+    "INSERT INTO omo_gateway_items VALUES ('duplicate unique', 'compiled SDK')",
+  ]) assert.equal((await sdk.extensionCall("omo_gateway", "sql", { sql })).code, "extension_operation_failed")
   assert.equal((await sdk.extensionCall("omo_gateway", "sql", { sql: "INSERT INTO MAIN.OMO_GATEWAY_ITEMS VALUES ('two', 'what?')" })).kind, "ok")
   assert.equal((await sdk.extensionCall("omo_gateway", "put", { bad: () => undefined })).code, "invalid_arguments")
   assert.equal((await sdk.bindings({})).kind, "ok")
@@ -34,11 +47,12 @@ try {
   const failed = await sdk.extensionCall("alpha", "enqueueThenThrow", { request, inbox })
   assert.deepEqual(failed, { kind: "refused", code: "extension_operation_failed", message: "rollback requested" })
   assert.deepEqual(existsSync(inbox) ? readdirSync(inbox) : [], [])
-  const db = new Database(dbPath, { readonly: true })
+  const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
-    assert.deepEqual(db.query("SELECT COUNT(*) AS n FROM deliveries").get(), { n: 0 })
-    assert.deepEqual(db.query("SELECT owner FROM extension_objects WHERE name = 'omo_gateway_items'").get(), { owner: "omo_gateway" })
-    assert.deepEqual(db.query("SELECT owner FROM extension_objects WHERE name LIKE 'sqlite_autoindex_omo_gateway_items_%'").all(), [{ owner: "omo_gateway" }, { owner: "omo_gateway" }])
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM deliveries").get().n, 0)
+    assert.equal(db.prepare("SELECT owner FROM extension_objects WHERE name = 'omo_gateway_items'").get().owner, "omo_gateway")
+    assert.deepEqual(db.prepare("SELECT owner FROM extension_objects WHERE name LIKE 'sqlite_autoindex_omo_gateway_items_%'").all().map((row) => row.owner), ["omo_gateway", "omo_gateway"])
+    assert.deepEqual(db.prepare("SELECT owner FROM extension_objects WHERE name LIKE 'sqlite_autoindex_composite_items_%'").all().map((row) => row.owner), ["composite", "composite"])
   } finally { db.close() }
   const committed = await sdk.extensionCall("alpha", "core", { op: "enqueue", request: { ...request, event_id: "committed" } })
   assert.equal(committed.value.kind, "ok")
@@ -49,13 +63,13 @@ try {
   assert.equal((await sdk.extensionCall("alpha", "core", { op: "enqueue", request: { binding_id: missingId, text: "no target", event_id: "missing" } })).value.error.code, "not_found")
   assert.deepEqual(await sdk.extensionCall("omo_gateway", "rows", { name: "omo_gateway" }), { kind: "ok", value: [{ id: "one", value: "compiled SDK" }, { id: "two", value: "what?" }] })
   await sdk.dispose()
-  const newerDb = new Database(dbPath)
+  const newerDb = new DatabaseSync(dbPath)
   try { newerDb.exec("PRAGMA user_version = 6") } finally { newerDb.close() }
   const olderSdk = createThreadSdk(options)
   try {
     assert.equal((await olderSdk.registerStoreExtension({ name: "alpha", moduleUrl, migrations: [] })).code, "gateway_schema_too_new")
   } finally { await olderSdk.dispose() }
-  console.log("PASS SDK: automatic indexes, quoted parameters, case folding, ownership, clone/core recovery, shared target validation, joined rollback, postcommit markers, newer-schema refusal")
+  console.log("PASS SDK: TEXT/composite primary keys, UNIQUE constraints, automatic indexes, quoted parameters, case folding, ownership, clone/core recovery, shared target validation, joined rollback, wake markers, newer-schema refusal")
 } finally {
   await sdk.dispose()
   rmSync(agentDir, { recursive: true, force: true })
