@@ -56,7 +56,7 @@ try {
   try {
     assert.equal((await olderSdk.registerStoreExtension({ name: "alpha", moduleUrl, migrations: [] })).code, "gateway_schema_too_new")
   } finally { await olderSdk.dispose() }
-  console.log("PASS SDK: automatic indexes, quoted parameters, case folding, ownership, clone/core recovery, shared target validation, joined rollback, postcommit markers, newer-schema refusal")
+  console.log("PASS SDK: automatic indexes, quoted parameters, case folding, ownership, clone/core recovery, shared target validation, joined rollback, pre-commit wake markers, newer-schema refusal")
 } finally {
   await sdk.dispose()
   rmSync(agentDir, { recursive: true, force: true })
