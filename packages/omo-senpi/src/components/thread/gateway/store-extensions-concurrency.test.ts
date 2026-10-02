@@ -15,7 +15,7 @@ test("#given two processes released together #when ensuring the same extension #
   const h = (harness = createGatewayHarness())
   await h.store().identity()
   const racers = [0, 1].map(() => {
-    const child = fork(fileURLToPath(new URL("./testing/extension-racer.ts", import.meta.url)), [h.agentDir, moduleUrl], { execPath: process.execPath, stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true })
+    const child = fork(fileURLToPath(new URL("./testing/extension-racer.ts", import.meta.url)), [h.agentDir, moduleUrl], { execPath: process.execPath, stdio: ["ignore", "pipe", "pipe", "ipc"] })
     let output = ""
     let stderr = ""
     child.stdout?.on("data", (chunk) => { output += chunk.toString() })
