@@ -209,11 +209,16 @@ and never a core row an extension can still act on through `tx`: an active bindi
 binding that still has outbox rows, completion arms or undelivered messages, or an undelivered
 message. A core id an extension keeps by value can name a row that retention has since pruned.
 
-A thrown operation rolls back extension rows and joined core writes together. Inbox/outbox
-marker writes and removals run only after COMMIT; rollback publishes no marker. Each
-post-commit effect runs independently: a failed marker emits an `extension_error` store event
-with phase `after_commit`, does not skip later effects, and does not turn committed data into
-a refused call. A returned relay refusal is data, so an operation that wants to undo its
+A thrown operation rolls back extension rows and joined core writes together. Inbox and outbox
+wake markers are written as in core operations: while the call's write lock is held, before
+COMMIT, so a committed delivery never lacks its wake, even if the process dies right after
+COMMIT. A receiver's own transaction waits for the writer, so an early marker is harmless. A
+failed inbox marker write fails its enqueue and the whole call rolls back; rollback removes the
+inbox markers the call created (a removal failure emits an `extension_error` store event with
+phase `after_rollback`), and a process exit before COMMIT can leave a spurious wake that the
+receiver discards. Marker removals for claimed or redirected deliveries run only after COMMIT,
+each independently: a failure emits an `extension_error` event with phase `after_commit` and
+does not turn committed data into a refused call. A returned relay refusal is data, so an operation that wants to undo its
 earlier work must throw. Catching an error from `all`, `one` or `exec` does not clear it:
 the whole call still rolls back, including for a caught constraint error.
 

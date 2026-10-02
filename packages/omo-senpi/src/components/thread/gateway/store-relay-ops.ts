@@ -67,13 +67,10 @@ function authorFromColumn(value: unknown): ExternalAuthor | null {
  * The outbox wake hint, rewritten after every outbox insert while the insert's write lock is held:
  * a temp file renamed over `outbox.marker`, so a watcher of the gateway directory never sees it half
  * written. Like the inbox marker it is only ever early - a reader's own transaction waits for this
- * one - and a rolled-back insert leaves a spurious wake, never a missed one.
+ * one - and a rolled-back insert leaves a spurious wake, never a missed one. A joined extension
+ * transaction writes it the same way, under its outer write lock, so its COMMIT cannot lack it.
  */
 function touchOutboxMarker(ctx: StoreContext, bindingId: string, cursor: number, now: number): void {
-  if (ctx.afterCommit !== undefined) {
-    ctx.afterCommit.push(() => touchOutboxMarker({ ...ctx, afterCommit: undefined }, bindingId, cursor, now))
-    return
-  }
   const marker = gatewayOutboxMarkerPath(ctx.config.agent_dir)
   const temporary = `${marker}.${process.pid}.${randomUUID()}.tmp`
   writeFileSync(temporary, JSON.stringify({ binding_id: bindingId, cursor, written_at: rfc3339(now) }), { mode: 0o600 })

@@ -67,6 +67,8 @@ export type StoreContext = {
   readonly delay: (ms: number) => Promise<void>
   /** Present only on a context joining an extension's outer transaction. */
   readonly afterCommit?: (() => void)[]
+  /** Present only on a context joining an extension's outer transaction: undoes file effects made before COMMIT. */
+  readonly afterRollback?: (() => void)[]
 }
 
 const DELIVERY_COLUMNS = [
@@ -187,10 +189,6 @@ export async function transaction<T>(ctx: StoreContext, op: string, body: () => 
 
 function createMarker(ctx: StoreContext, targetDurableId: string, deliveryId: string, allowExisting: boolean): string {
   const directory = gatewayInboxDirectory(ctx.config.agent_dir, targetDurableId)
-  if (ctx.afterCommit !== undefined) {
-    ctx.afterCommit.push(() => createMarker({ ...ctx, afterCommit: undefined }, targetDurableId, deliveryId, allowExisting))
-    return join(directory, deliveryId)
-  }
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const path = join(directory, deliveryId)
   let fd: number
@@ -200,6 +198,9 @@ function createMarker(ctx: StoreContext, targetDurableId: string, deliveryId: st
     if (allowExisting && error instanceof Error && "code" in error && error.code === "EEXIST") return path
     throw error
   }
+  // A joined extension transaction holds the write lock until its outer COMMIT, so a receiver's
+  // reconcile cannot read this marker before the row is visible; an outer rollback removes it.
+  ctx.afterRollback?.push(() => rmSync(path, { force: true }))
   try {
     writeSync(fd, JSON.stringify({ pid: ctx.self.pid, process_start_time: ctx.self.process_start_time }))
   } finally {
@@ -529,7 +530,7 @@ export async function enqueue(ctx: StoreContext, request: EnqueueRequest): Promi
     if (!committed) {
       rollbackQuietly(ctx)
       if (ctx.afterCommit !== undefined) ctx.afterCommit.length = effectsAtStart
-      else if (marker !== null) rmSync(marker, { force: true })
+      if (marker !== null) rmSync(marker, { force: true })
     }
     throw error
   }

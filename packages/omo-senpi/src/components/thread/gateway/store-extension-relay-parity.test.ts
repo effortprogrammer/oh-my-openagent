@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { gatewayInboxDirectory, gatewayRootDirectory } from "./paths"
@@ -35,7 +35,7 @@ test.each([false, true])("#given target session presence %s #when relay and tx e
   } finally { relay.dispose() }
 })
 
-test("#given a blocked inbox path #when two deliveries commit #then success and subsequent marker effects survive", async () => {
+test("#given a blocked inbox path #when the second joined enqueue cannot write its wake marker #then the call is refused and the first delivery and its marker roll back", async () => {
   const h = (harness = createGatewayHarness())
   h.phantom("blocked")
   h.phantom("healthy")
@@ -43,16 +43,8 @@ test("#given a blocked inbox path #when two deliveries commit #then success and 
   await store.registerStoreExtension({ name: "alpha", moduleUrl, migrations: [] })
   mkdirSync(join(gatewayRootDirectory(h.agentDir), "inbox"), { recursive: true })
   writeFileSync(gatewayInboxDirectory(h.agentDir, "blocked"), "not a directory")
-  const events: unknown[] = []
-  const remove = store.onEvent((event) => events.push(event))
-  try {
-    const outcome = await store.extensionCall("alpha", "enqueuePair", [bind("blocked"), bind("healthy")])
-    expect(outcome).toMatchObject({ kind: "ok", value: [{ kind: "ok" }, { kind: "ok" }] })
-    const rows = await store.list()
-    expect(rows).toHaveLength(2)
-    const healthy = rows.find((row) => row.target_durable_id === "healthy")
-    expect(healthy).toBeDefined()
-    expect(existsSync(join(gatewayInboxDirectory(h.agentDir, "healthy"), healthy?.delivery_id ?? ""))).toBe(true)
-    expect(events).toContainEqual({ kind: "extension_error", extension: "alpha", phase: "after_commit", error: expect.any(String) })
-  } finally { remove() }
+  const outcome = await store.extensionCall("alpha", "enqueuePair", [bind("healthy"), bind("blocked")])
+  expect(outcome).toMatchObject({ kind: "refused", code: "extension_operation_failed" })
+  expect(await store.list()).toEqual([])
+  expect(readdirSync(gatewayInboxDirectory(h.agentDir, "healthy"))).toEqual([])
 })

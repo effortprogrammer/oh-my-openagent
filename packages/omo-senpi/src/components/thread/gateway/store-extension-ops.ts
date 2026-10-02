@@ -101,11 +101,12 @@ export class StoreExtensions {
     const operation = Object.hasOwn(entry.module, op) ? entry.module[op] : undefined
     if (typeof operation !== "function") return refusal("extension_unknown_op", `Extension ${name} exports no operation ${op}.`)
     const effects: (() => void)[] = []
+    const rollback: (() => void)[] = []
     try {
       await this.ensure(entry.descriptor, now)
       const value = await transaction(this.ctx, "extension_call", async () => {
         const before = extensionSchema(this.ctx.sql)
-        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects }, name, now, this.resolveTarget)
+        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects, afterRollback: rollback }, name, now, this.resolveTarget)
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
           const run = async () => {
@@ -139,6 +140,13 @@ export class StoreExtensions {
       }
       return { kind: "ok", value }
     } catch (error) {
+      for (const undo of rollback) {
+        try {
+          undo()
+        } catch (cleanup) {
+          this.ctx.emit({ kind: "extension_error", extension: name, phase: "after_rollback", error: cleanup instanceof Error ? cleanup.message : String(cleanup) })
+        }
+      }
       return fromError(error)
     }
   }

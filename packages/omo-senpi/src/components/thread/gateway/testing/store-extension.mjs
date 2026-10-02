@@ -26,7 +26,7 @@ export async function enqueueThenThrow(tx, args) {
   const result = await tx.enqueue(args.request)
   if (result.kind !== "ok") throw new Error(JSON.stringify(result))
   tx.exec("INSERT INTO alpha_items (id, value) VALUES (1, 'rollback')")
-  if (existsSync(args.inbox) && readdirSync(args.inbox).length > 0) throw new Error("marker escaped before commit")
+  if (!existsSync(args.inbox) || readdirSync(args.inbox).length === 0) throw new Error("wake marker missing before commit")
   throw new Error("rollback requested")
 }
 
