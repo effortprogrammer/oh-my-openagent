@@ -242,7 +242,17 @@ export async function setThreadModel(options: ThreadToolSurfaceOptions, current:
   // Without the running model there is nothing true to record: the set_model reply echoes the request even when the engine holds it.
   if (before === null) return failure("unsupported", "This host does not report the model its session runs.", "Upgrade the host, or switch the model inside the session.") as Failure
   const revisionBefore = (await options.store.sessionModelRecord(resolved.entry.thread_id))?.revision ?? null
-  const selected = await port.setModel(routingId(session), matched.entry.provider, matched.entry.id)
+  // Noted before the engine is asked, so a switch that lands - now, or on a later turn after the
+  // engine held it - is attributed to this caller by the session's own observer, whichever writes first.
+  const intent = { durable_id: resolved.entry.thread_id, provider: matched.entry.provider, id: matched.entry.id, set_by: setBy }
+  await options.store.noteModelIntent(intent)
+  let selected: ModelRef
+  try {
+    selected = await port.setModel(routingId(session), matched.entry.provider, matched.entry.id)
+  } catch (error) {
+    await options.store.clearModelIntent(intent)
+    throw error
+  }
   const requested: ModelRef = { provider: selected.provider, id: selected.id }
   const { row, reads, swappedFrom } = await persistEngineState(options, resolved.entry.thread_id, () => port.getState(routingId(session)), (read, current) => {
     // A read-back that names no model cannot confirm anything: the record is left as it is.
@@ -257,7 +267,11 @@ export async function setThreadModel(options: ThreadToolSurfaceOptions, current:
   })
   const last = reads.at(-1)
   const model = row ?? { ...(last?.ref ?? before), thinking_level: last?.thinking ?? null, provenance: "set", set_by: "user", reason: null }
-  if (last?.ref !== null && last?.ref !== undefined && sameRef(model, requested) && sameRef(last.ref, requested)) return { kind: "ok", thread_id: resolved.entry.thread_id, model }
+  if (last?.ref !== null && last?.ref !== undefined && sameRef(model, requested) && sameRef(last.ref, requested)) {
+    // Applied, and recorded with this caller's setter, which an observer arriving later keeps.
+    await options.store.clearModelIntent(intent)
+    return { kind: "ok", thread_id: resolved.entry.thread_id, model }
+  }
   // Not applied: the ok result names what runs and the requested model. `pending` is a switch the
   // engine holds and applies from a later turn; `superseded` is one another switch replaced, which will
   // not apply. A host that reports its held switch answers that directly. Otherwise a read-back still
@@ -269,6 +283,10 @@ export async function setThreadModel(options: ThreadToolSurfaceOptions, current:
   const held = last?.ref === null || last === undefined ? true
     : last.held !== undefined ? last.held !== null && sameRef(last.held, requested)
     : !applied && sameRef(last.ref, before) && (revisionBefore === null || untouched)
+  // A held switch keeps its intent for the turn it lands on (a record this call just created gets it
+  // now); a superseded one will not land, so its intent goes.
+  if (held) await options.store.noteModelIntent({ ...intent, ...requested })
+  else await options.store.clearModelIntent(intent)
   return { kind: "ok", thread_id: resolved.entry.thread_id, model, ...(held ? { pending: requested } : { superseded: requested }) }
 }
 

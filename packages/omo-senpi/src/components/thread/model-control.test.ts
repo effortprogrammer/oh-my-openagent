@@ -362,6 +362,7 @@ type EngineSession = {
   readonly model: EngineModel | undefined
   readonly thinkingLevel: string
   _switchActiveModel(model: EngineModel, options: EngineSwitchOptions): Promise<unknown>
+  _applyPendingModelSwitch(assistantMessage: unknown, skipAbortedCheck: boolean, inlineReason: unknown): Promise<boolean>
 }
 
 const CLAUDE = { provider: "anthropic", id: "claude-opus-5-5" }
@@ -414,7 +415,10 @@ function engineFixture() {
     _emitServiceTierChangeIfNeeded() {},
     getAvailableThinkingLevels: () => ENGINE_LEVELS[`${engine.model?.provider}/${engine.model?.id}`] ?? ["off"],
     _projectSwitchDeferral: () => (admission.hold ? { requiredTokens: 200_000, contextWindow: 100_000 } : undefined),
-    _admitSwitchCompactionRequired() {},
+    // The held switch is the engine's own (`_admitSwitchCompactionRequired` stores it); its next turn applies it
+    // through `_applyPendingModelSwitch`, with the compaction before it a double that makes the candidate fit.
+    _runPrePromptCompaction: async () => {},
+    _projectSwitchFit: () => ({ usable: true }),
     _reduceForSwitchTarget: (_model: EngineModel, tokens: number) => tokens,
     _assertModelUsableForSwitch: () => { if (admission.refuse) throw new Error("the live context does not fit the candidate model") },
   })
@@ -490,7 +494,9 @@ function engineFixture() {
     disposables.push(sdk)
     return { sdk, beforeStateReply: (wait: () => Promise<void>) => { hold = { wait, armed: false } } }
   }
-  return { engine, admission, userSwitch, runtimeSwitch, providerError, settle, observed, bindMilestones, rows, recorded, record, sharedSdk }
+  /** The session's next turn: the engine applies the switch it held, before the provider is called (`_enforceCompactionBeforeProvider`). */
+  const nextTurn = () => engine._applyPendingModelSwitch(undefined, true, undefined)
+  return { engine, admission, userSwitch, runtimeSwitch, providerError, settle, nextTurn, observed, bindMilestones, rows, recorded, record, sharedSdk }
 }
 
 type GatewayStoreModel = Parameters<GatewayStore["recordSessionModel"]>[0]["model"]
@@ -905,5 +911,32 @@ describe("#9429 the command path and the session's own observer share one store"
     expect(result).toMatchObject({ kind: "ok", model: chosen, pending: GPT_Y })
     expect("superseded" in result).toBe(false)
     expect(await e.recorded()).toEqual(chosen)
+    // The hold lands on the next turn, through the engine's own `set` switch: it is still the lead's choice.
+    e.admission.hold = false
+    const landed = e.observed()
+    expect(await e.nextTurn()).toBe(true)
+    await e.settle()
+    await landed
+    expect(e.engine.model).toMatchObject(GPT_Y)
+    expect(await e.recorded()).toMatchObject({ ...GPT_Y, provenance: "set", set_by: "lead", reason: null })
+  })
+
+  test("#given a held set-model by the lead #when another switch lands first and the user later picks the held model with /model #then that later switch is the user's", async () => {
+    const e = engineFixture()
+    await e.record({ ...CLAUDE, thinking_level: "high", provenance: "set", set_by: "config", reason: null })
+    const shared = e.sharedSdk()
+    e.admission.hold = true
+    expect(await shared.sdk.setModel({ thread: "lane", model: "gpt-y", set_by: "lead" })).toMatchObject({ kind: "ok", pending: GPT_Y })
+    e.admission.hold = false
+    // A landed switch retires the engine's hold, and with it the lead's claim on that model.
+    const first = e.observed()
+    await e.userSwitch({ provider: "openai", id: "gpt-x", defaultThinkingLevel: "high" })
+    await first
+    expect(await e.nextTurn()).toBe(false)
+    const second = e.observed()
+    await e.userSwitch(GPT_Y_MODEL)
+    await e.settle()
+    await second
+    expect(await e.recorded()).toMatchObject({ ...GPT_Y, provenance: "set", set_by: "user" })
   })
 })

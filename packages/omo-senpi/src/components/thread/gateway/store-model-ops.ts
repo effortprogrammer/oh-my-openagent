@@ -5,11 +5,11 @@
  * its revert) and writes one `milestone` row per outbound binding for a fallback switch.
  */
 import type { SqlRow } from "./sql"
-import { fallbackMilestoneText, type ModelChange, type ModelProvenance, type ModelSetter, type ObserveModelRequest, type ObserveModelResult, type SessionModelRecord, type ThreadModel } from "./session-models"
+import { fallbackMilestoneText, type ModelChange, type ModelIntent, type ModelProvenance, type ModelSetter, type ObserveModelRequest, type ObserveModelResult, type SessionModelRecord, type ThreadModel } from "./session-models"
 import { type StoreContext, transaction, write } from "./store-ops"
 import { expireDue, insertOutbox, selectBindings } from "./store-relay-ops"
 
-const COLUMNS = ["durable_id", "provider", "model_id", "thinking_level", "provenance", "set_by", "reason", "chosen_provider", "chosen_model_id", "chosen_provenance", "revision"] as const
+const COLUMNS = ["durable_id", "provider", "model_id", "thinking_level", "provenance", "set_by", "reason", "chosen_provider", "chosen_model_id", "chosen_provenance", "revision", "pending_provider", "pending_model_id", "pending_set_by"] as const
 
 function nullable(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value)
@@ -84,6 +84,23 @@ export async function recordSessionModelIfCurrent(ctx: StoreContext, request: { 
   })
 }
 
+/**
+ * Notes `set-model`'s switch before the engine is asked (#9429 P3), so a switch the engine holds and
+ * applies on a later turn is still attributed to its caller when the session observes it landing.
+ * Replaces any earlier intent; a session without a record keeps none. It changes no model the record
+ * names, so it moves no revision.
+ */
+export async function noteModelIntent(ctx: StoreContext, request: ModelIntent): Promise<boolean> {
+  return await transaction(ctx, "note_model_intent", () =>
+    write(ctx, "UPDATE session_models SET pending_provider = ?, pending_model_id = ?, pending_set_by = ? WHERE durable_id = ?", [request.provider, request.id, request.set_by, request.durable_id]) > 0)
+}
+
+/** Drops the intent a `set-model` noted, once it knows its switch will not land later; a later caller's intent is left alone. */
+export async function clearModelIntent(ctx: StoreContext, request: ModelIntent): Promise<boolean> {
+  return await transaction(ctx, "clear_model_intent", () =>
+    write(ctx, "UPDATE session_models SET pending_provider = NULL, pending_model_id = NULL, pending_set_by = NULL WHERE durable_id = ? AND pending_provider = ? AND pending_model_id = ? AND pending_set_by = ?", [request.durable_id, request.provider, request.id, request.set_by]) > 0)
+}
+
 /** A new thinking level for a session the gateway has a record of; false when it has none. */
 export async function updateSessionThinking(ctx: StoreContext, request: { readonly now: number; readonly durable_id: string; readonly thinking_level: string }): Promise<boolean> {
   return await transaction(ctx, "update_session_thinking", () =>
@@ -93,6 +110,10 @@ export async function updateSessionThinking(ctx: StoreContext, request: { readon
 function observe(ctx: StoreContext, request: ObserveModelRequest, row: SqlRow): void {
   const to = [request.to.provider, request.to.id]
   const thinking = request.thinking_level
+  // Any switch that lands retires the engine's held switch (agent-session `_switchActiveModel` and
+  // `cycleModel` clear `_pendingModelSwitch`), so it retires the intent noted for it too.
+  const intended = request.source === "set" && row.pending_provider === request.to.provider && row.pending_model_id === request.to.id
+  if (row.pending_provider !== null) write(ctx, "UPDATE session_models SET pending_provider = NULL, pending_model_id = NULL, pending_set_by = NULL WHERE durable_id = ?", [request.durable_id])
   if (request.source === "fallback") {
     // A second fallback in the same window keeps the model the first one overrode.
     const chosen = row.provenance === "fallback" ? [row.chosen_provider, row.chosen_model_id, row.chosen_provenance] : [row.provider, row.model_id, row.provenance]
@@ -110,10 +131,11 @@ function observe(ctx: StoreContext, request: ObserveModelRequest, row: SqlRow): 
     write(ctx, "UPDATE session_models SET provider = ?, model_id = ?, thinking_level = COALESCE(?, thinking_level), provenance = COALESCE(chosen_provenance, 'set'), reason = NULL, updated_at = ?, revision = revision + 1 WHERE durable_id = ?", [...to, thinking, request.now, request.durable_id])
     return
   }
-  // `set` or `cycle`: an explicit switch. The gateway writes its own setter after the engine switched,
-  // so the switch the session observes for the model the record already names as set keeps that setter.
+  // `set` or `cycle`: an explicit switch. A `set` landing on the model a `set-model` noted is that
+  // caller's, held or not. The gateway also writes its own setter after the engine switched, so the
+  // switch the session observes for the model the record already names as set keeps that setter.
   const same = row.provider === request.to.provider && row.model_id === request.to.id && row.provenance === "set"
-  const setBy = same ? nullable(row.set_by) : "user"
+  const setBy = intended ? nullable(row.pending_set_by) : same ? nullable(row.set_by) : "user"
   write(ctx, "UPDATE session_models SET provider = ?, model_id = ?, thinking_level = COALESCE(?, thinking_level), provenance = 'set', set_by = ?, reason = NULL, chosen_provider = ?, chosen_model_id = ?, chosen_provenance = 'set', updated_at = ?, revision = revision + 1 WHERE durable_id = ?", [
     ...to, thinking, setBy, ...to, request.now, request.durable_id,
   ])

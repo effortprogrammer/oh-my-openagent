@@ -27,6 +27,9 @@ export type ThreadModel = ModelRef & {
  */
 export type SessionModelRecord = { readonly model: ThreadModel; readonly revision: number }
 
+/** A switch a `set-model` caller asked for, and who asked: what the session's observer attributes it to once it lands (#9429). */
+export type ModelIntent = { readonly durable_id: string; readonly provider: string; readonly id: string; readonly set_by: ModelSetter }
+
 /** The `model_change` field of the milestone row a fallback switch writes. */
 export type ModelChange = { readonly from: ModelRef; readonly to: ModelRef; readonly reason: string | null }
 

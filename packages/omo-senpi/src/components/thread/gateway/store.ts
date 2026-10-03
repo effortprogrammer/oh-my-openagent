@@ -20,7 +20,7 @@ import type {
   ReportOpResult,
   ToolReceiptBegin,
 } from "./store-relay-ops"
-import type { ObserveModelRequest, ObserveModelResult, SessionModelRecord, ThreadModel } from "./session-models"
+import type { ModelIntent, ObserveModelRequest, ObserveModelResult, SessionModelRecord, ThreadModel } from "./session-models"
 import type { DeliveryReceipt } from "./store-ops"
 import type { ClearEndpointRequest, RegisterIncarnationRequest, SessionOwner } from "./store-ownership"
 import type {
@@ -126,6 +126,10 @@ export type GatewayStore = StoreExtensionApi & {
   readonly recordSessionModel: (request: { readonly now: number; readonly durable_id: string; readonly model: ThreadModel }) => Promise<ThreadModel>
   /** Compare-and-swap variant (#9429 B2): writes only while the record is still at `expect_revision` (null: no record); `record` is the record after the call. */
   readonly recordSessionModelIfCurrent: (request: { readonly now: number; readonly durable_id: string; readonly expect_revision: number | null; readonly model: ThreadModel }) => Promise<{ readonly applied: boolean; readonly record: SessionModelRecord | null }>
+  /** #9429 P3: notes the switch a set-model asks for and who asked, before the engine is asked; false without a record. */
+  readonly noteModelIntent: (request: ModelIntent) => Promise<boolean>
+  /** Drops that intent when its switch will not land later, unless a later caller replaced it. */
+  readonly clearModelIntent: (request: ModelIntent) => Promise<boolean>
   /** A new thinking level for a session with a model record; false when there is none. */
   readonly updateSessionThinking: (request: { readonly now: number; readonly durable_id: string; readonly thinking_level: string }) => Promise<boolean>
   /** The session's own `model_select`: keeps its record true and writes a fallback switch's milestone rows. */
@@ -359,6 +363,8 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
     markPriorDelivered: (request) => call("mark_prior_delivered", request),
     recordSessionModel: (request) => call("record_session_model", request),
     recordSessionModelIfCurrent: (request) => call("record_session_model_if_current", request),
+    noteModelIntent: (request) => call("note_model_intent", request),
+    clearModelIntent: (request) => call("clear_model_intent", request),
     updateSessionThinking: (request) => call("update_session_thinking", request),
     observeModelSelect: (request) => call("observe_model_select", request),
     sessionModels: (durableIds) => call("session_models", durableIds),
